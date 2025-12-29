@@ -1,5 +1,6 @@
 package cn.lemwood.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -126,7 +127,6 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
     val states by viewModel.serverStates.collectAsState()
     val state = server?.let { states[it.id] }
     val metrics = state?.metrics
-    val status = state?.status
     val isApiMode = server?.mode == "API"
     var showRaw by remember { mutableStateOf(false) }
 
@@ -728,10 +728,11 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
     val state = serverStates[server.id]
     val logs = state?.logs ?: emptyList()
     val listState = rememberLazyListState()
+    var autoScroll by remember { mutableStateOf(true) }
 
     // 自动滚动到底部
-    LaunchedEffect(logs.size) {
-        if (logs.isNotEmpty()) {
+    LaunchedEffect(logs.size, autoScroll) {
+        if (autoScroll && logs.isNotEmpty()) {
             listState.animateScrollToItem(logs.size - 1)
         }
     }
@@ -739,13 +740,34 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
     Column(modifier = Modifier
         .padding(16.dp)
         .fillMaxSize()) {
-        Text("控制台终端", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("控制台终端", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            
+            Row {
+                IconButton(onClick = { autoScroll = !autoScroll }) {
+                    Icon(
+                        if (autoScroll) Icons.Default.VerticalAlignBottom else Icons.Default.VerticalAlignTop,
+                        contentDescription = "自动滚动",
+                        tint = if (autoScroll) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    )
+                }
+                IconButton(onClick = { viewModel.clearLogs(server.id) }) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = "清除日志", tint = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+        
+        Spacer(Modifier.height(12.dp))
         
         Card(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1C))
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF121212)),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
         ) {
             Box(modifier = Modifier.padding(12.dp).fillMaxSize()) {
                 if (logs.isEmpty()) {
@@ -784,7 +806,11 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(12.dp),
                 singleLine = true,
-                leadingIcon = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                leadingIcon = { Icon(Icons.Default.ChevronRight, contentDescription = null) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                )
             )
             Spacer(Modifier.width(8.dp))
             FloatingActionButton(
@@ -796,7 +822,8 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
             ) {
                 Icon(Icons.Default.Send, contentDescription = "发送")
             }

@@ -248,6 +248,13 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
         }
     }
 
+    fun clearLogs(serverId: Int) {
+        _serverStates.value = _serverStates.value.toMutableMap().apply {
+            val currentState = get(serverId) ?: ServerUIState()
+            put(serverId, currentState.copy(logs = emptyList()))
+        }
+    }
+
     fun deleteServer(server: ServerEntity) {
         viewModelScope.launch {
             repository.deleteServer(server)

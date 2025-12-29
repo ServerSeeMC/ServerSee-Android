@@ -36,7 +36,9 @@ object MinecraftTextParser {
             var isUnderlined = false
             var isItalic = false
 
-            val parts = text.split('§')
+            // 支持 § 和 & 颜色代码
+            val sanitizedText = text.replace('&', '§')
+            val parts = sanitizedText.split('§')
             append(parts[0]) // Append text before first §
 
             for (i in 1 until parts.size) {
