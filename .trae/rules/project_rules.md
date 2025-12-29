@@ -33,6 +33,7 @@
 - **Gradle 配置**: 必须启用 `android.useAndroidX` 和 `android.enableJetifier` 以支持现代库。
 - **Compose 实验性 API**: 使用 `basicMarquee` 或 `CenterAlignedTopAppBar` 等实验性组件时，需添加 `@OptIn` 注解及对应库引用。
 - **图标资源**: 已根据 `ai_studio_code.txt` 中的 SVG 设计实现了 Material 3 风格的自适应图标 (Adaptive Icon)。包含背景层 (`#E0F2F1`) 和前景层 (深青色条纹与高亮装饰点)，并适配了 API 26+ 的自适应特性及旧版本的兼容显示。
+- **CI/CD**: 已配置 GitHub Actions 工作流。每次推送到 `main`/`master` 分支会自动执行构建，推送以 `v*` 开头的 Tag 时会自动创建 GitHub Release 并上传构建产物（Plugin 的 Shaded JAR 或 APK 文件）。工作流已配置 `contents: write` 权限。
 - **资源引用**: `AndroidManifest.xml` 中引用的图标或主题必须在 `res` 目录中真实存在，否则会导致 AAPT 编译错误。目前已配置 `@mipmap/ic_launcher`。
 - **明文传输**: Android 9+ 默认禁止 HTTP 明文传输。需在 `res/xml` 创建 `network_security_config.xml` 允许明文传输，并在 `AndroidManifest.xml` 的 `application` 标签中通过 `android:networkSecurityConfig` 引用。
 - **403 错误处理**: 若 API 返回 403 Forbidden，通常是由于缺少 `User-Agent` 或服务器配置了强制鉴权。已在 `ServerRepository` 中通过 `OkHttpClient` 拦截器统一添加 `User-Agent`，并确保所有请求（包括状态查询）在有 Token 时都会携带 `Authorization` 头。
