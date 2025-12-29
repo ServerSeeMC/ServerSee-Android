@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -34,7 +35,7 @@ fun HomeScreen(
 
     // Statistics calculations
     val totalServers = servers.size
-    val onlineServers = serverStates.values.count { it.status != null }
+    val offlineServers = servers.size - serverStates.values.count { it.status != null && it.lastError == null }
     val totalPlayers = serverStates.values.sumOf { it.status?.players ?: 0 }
 
     Scaffold(
@@ -43,7 +44,7 @@ fun HomeScreen(
                 title = { 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "Minecraft 服务器", 
+                            "ServerSee 客户端", 
                             fontWeight = FontWeight.Bold
                         )
                         Text(
@@ -86,26 +87,53 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 StatItem(label = "总数", value = "$totalServers", color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                StatItem(label = "在线", value = "$onlineServers", color = McGreen, modifier = Modifier.weight(1f))
+                StatItem(label = "离线", value = "$offlineServers", color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
                 StatItem(label = "玩家", value = "$totalPlayers", color = McGold, modifier = Modifier.weight(1f))
             }
 
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp)
-            ) {
-                items(servers) { server ->
-                    val state = serverStates[server.id]
-                    ServerCard(
-                        name = server.name,
-                        status = state?.status,
-                        metrics = state?.metrics,
-                        lastError = state?.lastError,
-                        serverAddress = server.serverAddress,
-                        useAddressForIcon = server.useAddressForIcon,
-                        onClick = { onServerClick(server.id) },
-                        onDelete = { viewModel.deleteServer(server) }
-                    )
+            if (servers.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.Dns,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "暂无服务器",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "点击右下角按钮添加第一个服务器",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    items(servers) { server ->
+                        val state = serverStates[server.id]
+                        ServerCard(
+                            name = server.name,
+                            status = state?.status,
+                            metrics = state?.metrics,
+                            lastError = state?.lastError,
+                            serverAddress = server.serverAddress,
+                            useAddressForIcon = server.useAddressForIcon,
+                            mode = server.mode,
+                            onClick = { onServerClick(server.id) },
+                            onDelete = { viewModel.deleteServer(server) }
+                        )
+                    }
                 }
             }
         }
@@ -117,13 +145,13 @@ fun HomeScreen(
                     showDialog = false
                     viewModel.resetAddDialogState()
                 },
-                onConfirm = { name, endpoint, token, serverAddress, useAddressForIcon ->
-                    viewModel.addServer(name, endpoint, token, serverAddress, useAddressForIcon)
+                onConfirm = { name, endpoint, token, serverAddress, useAddressForIcon, mode ->
+                    viewModel.addServer(name, endpoint, token, serverAddress, useAddressForIcon, mode)
                     showDialog = false
                     viewModel.resetAddDialogState()
                 },
-                onTest = { endpoint, token ->
-                    viewModel.testConnection(endpoint, token)
+                onTest = { endpoint, token, mode ->
+                    viewModel.testConnection(endpoint, token, mode)
                 },
                 testResult = dialogState.testResult,
                 isTesting = dialogState.isTesting,

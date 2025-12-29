@@ -69,3 +69,11 @@ interface ServerSeeApi {
         @Field("name") name: String
     ): Map<String, Any>
 }
+
+interface McStatApi {
+    @GET("https://api.mcsrvstat.us/3/{address}")
+    suspend fun getJavaStatus(@retrofit2.http.Path("address") address: String): Response<ResponseBody>
+
+    @GET("https://api.mcsrvstat.us/bedrock/3/{address}")
+    suspend fun getBedrockStatus(@retrofit2.http.Path("address") address: String): Response<ResponseBody>
+}

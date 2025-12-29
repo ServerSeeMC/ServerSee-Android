@@ -1,5 +1,6 @@
 package cn.lemwood.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
@@ -26,18 +27,30 @@ import coil.compose.AsyncImage
 @Composable
 fun AddServerDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, endpoint: String, token: String?, serverAddress: String?, useAddressForIcon: Boolean) -> Unit,
-    onTest: (endpoint: String, token: String?) -> Unit,
+    onConfirm: (name: String, endpoint: String, token: String?, serverAddress: String?, useAddressForIcon: Boolean, mode: String) -> Unit,
+    onTest: (endpoint: String, token: String?, mode: String) -> Unit,
     testResult: String?,
     isTesting: Boolean,
     testedStatus: ServerStatus? = null
 ) {
+    var mode by remember { mutableStateOf("API") } // API, JAVA_ADDRESS, BEDROCK_ADDRESS
     var name by remember { mutableStateOf("") }
     var endpoint by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var serverAddress by remember { mutableStateOf("") }
     var autoFillName by remember { mutableStateOf(true) }
     var useAddressForIcon by remember { mutableStateOf(false) }
+
+    // Logic to sync endpoint and serverAddress for non-API modes
+    LaunchedEffect(mode, serverAddress, endpoint) {
+        if (mode != "API") {
+            if (endpoint.isBlank() && serverAddress.isNotBlank()) {
+                endpoint = serverAddress
+            } else if (serverAddress.isBlank() && endpoint.isNotBlank()) {
+                serverAddress = endpoint
+            }
+        }
+    }
 
     // When testedStatus changes and autoFillName is true, update name if empty
     LaunchedEffect(testedStatus) {
@@ -59,6 +72,34 @@ fun AddServerDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.verticalScroll(scrollState)
             ) {
+                // Mode Selection
+                Text("添加方式", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ModeButton(
+                        label = "API 端点",
+                        selected = mode == "API",
+                        onClick = { mode = "API" },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ModeButton(
+                        label = "JAVA 地址",
+                        selected = mode == "JAVA_ADDRESS",
+                        onClick = { mode = "JAVA_ADDRESS" },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ModeButton(
+                        label = "基岩地址",
+                        selected = mode == "BEDROCK_ADDRESS",
+                        onClick = { mode = "BEDROCK_ADDRESS" },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -66,27 +107,41 @@ fun AddServerDialog(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("例如: 我的生存服务器") }
                 )
-                OutlinedTextField(
-                    value = endpoint,
-                    onValueChange = { endpoint = it },
-                    label = { Text("API 端点 (必填)") },
-                    placeholder = { Text("例如: 192.168.1.100:8080") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = serverAddress,
-                    onValueChange = { serverAddress = it },
-                    label = { Text("服务器连接地址 (可选)") },
-                    placeholder = { Text("例如: play.example.com") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it },
-                    label = { Text("Token (选填)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("管理功能需要 Token") }
-                )
+
+                if (mode == "API") {
+                    OutlinedTextField(
+                        value = endpoint,
+                        onValueChange = { endpoint = it },
+                        label = { Text("API 端点 (必填)") },
+                        placeholder = { Text("例如: 192.168.1.100:8080") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = serverAddress,
+                        onValueChange = { serverAddress = it },
+                        label = { Text("服务器连接地址 (可选)") },
+                        placeholder = { Text("例如: play.example.com") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = { token = it },
+                        label = { Text("Token (选填)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("管理功能需要 Token") }
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = serverAddress,
+                        onValueChange = { 
+                            serverAddress = it
+                            endpoint = it // For address modes, endpoint stores the address
+                        },
+                        label = { Text("服务器地址") },
+                        placeholder = { Text(if (mode == "JAVA_ADDRESS") "例如: play.hypixel.net" else "例如: play.nethergames.org") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
                 Column {
                     Row(
@@ -162,7 +217,7 @@ fun AddServerDialog(
                 }
 
                 Button(
-                    onClick = { onTest(endpoint.trim(), token.trim().ifBlank { null }) },
+                    onClick = { onTest(endpoint.trim(), token.trim().ifBlank { null }, mode) },
                     enabled = endpoint.isNotBlank() && !isTesting,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -196,10 +251,12 @@ fun AddServerDialog(
                             endpoint.trim(), 
                             token.trim().ifBlank { null },
                             serverAddress.trim().ifBlank { null },
-                            useAddressForIcon
+                            useAddressForIcon,
+                            mode
                         )
                     }
-                }
+                },
+                enabled = endpoint.isNotBlank()
             ) {
                 Text("确定")
             }
@@ -210,4 +267,32 @@ fun AddServerDialog(
             }
         }
     )
+}
+
+@Composable
+fun ModeButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
+    ) {
+        Box(
+            modifier = Modifier.padding(vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    }
 }

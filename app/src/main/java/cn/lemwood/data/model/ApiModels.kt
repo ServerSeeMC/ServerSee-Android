@@ -33,3 +33,7 @@ data class WhitelistResponse(
     val enabled: Boolean,
     val players: List<String>
 )
+
+data class LogResponse(
+    val lines: List<String>
+)

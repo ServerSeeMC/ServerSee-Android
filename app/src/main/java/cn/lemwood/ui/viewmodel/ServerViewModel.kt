@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 data class ServerUIState(
     val status: ServerStatus? = null,
     val metrics: ServerMetrics? = null,
+    val history: List<ServerMetrics> = emptyList(),
+    val logs: List<String> = emptyList(),
     val lastError: String? = null,
     val rawStatus: String? = null,
     val rawMetrics: String? = null,
@@ -36,11 +38,50 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
     private val _addServerDialogState = MutableStateFlow(ServerUIState())
     val addServerDialogState = _addServerDialogState.asStateFlow()
 
+    private var pollingJob: kotlinx.coroutines.Job? = null
+    private var logJob: kotlinx.coroutines.Job? = null
+    private val _activeServerId = MutableStateFlow<Int?>(null)
+
     init {
         startPolling()
+        
+        // 监听活跃服务器变化，启动/停止日志同步
+        viewModelScope.launch {
+            _activeServerId.collectLatest { serverId ->
+                logJob?.cancel()
+                if (serverId != null) {
+                    val server = repository.allServers.first().find { it.id == serverId }
+                    if (server != null && server.mode == "API" && !server.token.isNullOrBlank()) {
+                        startLogSync(server)
+                    }
+                }
+            }
+        }
     }
 
-    fun testConnection(endpoint: String, token: String?) {
+    private fun startLogSync(server: ServerEntity) {
+        logJob = viewModelScope.launch {
+            // 清空旧日志
+            _serverStates.value = _serverStates.value.toMutableMap().apply {
+                put(server.id, (get(server.id) ?: ServerUIState()).copy(logs = emptyList()))
+            }
+            
+            repository.getLogStream(server.endpoint, server.token!!)
+                .collect { logLine ->
+                    _serverStates.value = _serverStates.value.toMutableMap().apply {
+                        val currentState = get(server.id) ?: ServerUIState()
+                        val newLogs = (currentState.logs + logLine).takeLast(200) // 最多保留 200 行
+                        put(server.id, currentState.copy(logs = newLogs))
+                    }
+                }
+        }
+    }
+
+    fun setActiveServer(serverId: Int?) {
+        _activeServerId.value = serverId
+    }
+
+    fun testConnection(endpoint: String, token: String?, mode: String) {
         viewModelScope.launch {
             _addServerDialogState.value = _addServerDialogState.value.copy(
                 isTesting = true, 
@@ -48,10 +89,10 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
                 testedStatus = null
             )
             try {
-                val status = repository.getServerStatus(endpoint, token)
+                val status = repository.getServerStatus(endpoint, token, mode)
                 var result = "连接成功！版本: ${status.version}\n玩家: ${status.players}/${status.maxPlayers}"
                 
-                if (token != null) {
+                if (mode == "API" && token != null) {
                     try {
                         val response = repository.getWhitelist(endpoint, token)
                         result += "\nToken 验证成功！白名单人数: ${response.players.size}"
@@ -97,15 +138,35 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
 
     private suspend fun refreshServer(server: ServerEntity) {
         try {
-            val status = repository.getServerStatus(server.endpoint, server.token)
-            val metrics = repository.getServerMetrics(server.endpoint, server.token)
-            val rawStatus = try { repository.getServerStatusRaw(server.endpoint, server.token) } catch (e: Exception) { e.message }
-            val rawMetrics = try { repository.getServerMetricsRaw(server.endpoint, server.token) } catch (e: Exception) { e.message }
+            val status = repository.getServerStatus(server.endpoint, server.token, server.mode)
+            val metrics = if (server.mode == "API") {
+                repository.getServerMetrics(server.endpoint, server.token)
+            } else {
+                null
+            }
             
+            // 只有活跃服务器且是 API 模式才获取历史记录和原始数据
+            val isActive = _activeServerId.value == server.id
+            val history = if (isActive && server.mode == "API") {
+                try { repository.getHistory(server.endpoint) } catch (e: Exception) { emptyList() }
+            } else {
+                _serverStates.value[server.id]?.history ?: emptyList()
+            }
+            
+            val rawStatus = if (isActive) {
+                try { repository.getServerStatusRaw(server.endpoint, server.token, server.mode) } catch (e: Exception) { e.message }
+            } else null
+            
+            val rawMetrics = if (isActive && server.mode == "API") {
+                try { repository.getServerMetricsRaw(server.endpoint, server.token) } catch (e: Exception) { e.message }
+            } else null
+
             _serverStates.value = _serverStates.value.toMutableMap().apply {
-                put(server.id, ServerUIState(
+                val currentState = get(server.id) ?: ServerUIState()
+                put(server.id, currentState.copy(
                     status = status,
                     metrics = metrics,
+                    history = history,
                     rawStatus = rawStatus,
                     rawMetrics = rawMetrics
                 ))
@@ -120,15 +181,19 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
     }
 
     private fun startPolling() {
-        viewModelScope.launch {
-            repository.allServers.distinctUntilChanged().collectLatest { list ->
+        pollingJob?.cancel()
+        pollingJob = viewModelScope.launch {
+            repository.allServers.collectLatest { list ->
                 while (true) {
                     list.forEach { server ->
                         launch {
+                            // 如果是当前正在查看的服务器，或者间隔一段时间更新一次首页
                             refreshServer(server)
                         }
                     }
-                    delay(5000)
+                    // 动态调整延迟：如果有活跃服务器，可以快一点；否则慢一点
+                    val delayTime = if (_activeServerId.value != null) 3000L else 5000L
+                    delay(delayTime)
                 }
             }
         }
@@ -189,9 +254,16 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
         }
     }
 
-    fun addServer(name: String, endpoint: String, token: String?, serverAddress: String?, useAddressForIcon: Boolean) {
+    fun addServer(name: String, endpoint: String, token: String?, serverAddress: String?, useAddressForIcon: Boolean, mode: String) {
         viewModelScope.launch {
-            repository.addServer(name, endpoint, token, serverAddress, useAddressForIcon)
+            repository.addServer(ServerEntity(
+                name = name, 
+                endpoint = endpoint, 
+                token = token,
+                serverAddress = serverAddress,
+                useAddressForIcon = useAddressForIcon,
+                mode = mode
+            ))
         }
     }
 }

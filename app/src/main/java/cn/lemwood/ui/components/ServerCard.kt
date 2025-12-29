@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Games
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +32,7 @@ fun ServerCard(
     lastError: String?,
     serverAddress: String? = null,
     useAddressForIcon: Boolean = false,
+    mode: String = "API",
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -116,12 +118,28 @@ fun ServerCard(
                 Spacer(modifier = Modifier.width(12.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = name,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (mode != "API") {
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = if (mode == "JAVA_ADDRESS") "JAVA" else "BE",
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+                    }
                     Text(
                         text = status?.version ?: "未知版本",
                         fontSize = 12.sp,
@@ -198,35 +216,50 @@ fun ServerCard(
                     modifier = Modifier.weight(1f)
                 )
                 MetricItem(
-                    icon = Icons.Default.Speed,
-                    label = "TPS",
-                    value = String.format("%.1f", metrics?.tps5s ?: 0.0),
+                    icon = if (mode == "BEDROCK_ADDRESS") Icons.Outlined.Games else Icons.Default.Speed,
+                    label = if (mode == "API") "TPS" else "类型",
+                    value = if (mode == "API") {
+                        String.format("%.1f", metrics?.tps5s ?: 0.0)
+                    } else if (mode == "BEDROCK_ADDRESS") {
+                        status?.gamemode ?: "未知"
+                    } else {
+                        // 提取服务端类型
+                        val version = status?.version ?: ""
+                        if (version.contains(" ")) {
+                            version.split(" ").first()
+                        } else {
+                            "JAVA"
+                        }
+                    },
                     tint = McGreen,
                     modifier = Modifier.weight(1f)
                 )
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                MetricItem(
-                    icon = Icons.Default.Memory,
-                    label = "内存",
-                    value = if ((metrics?.memUsed ?: 0.0) > 1024) String.format("%.1f", (metrics?.memUsed ?: 0.0) / 1024) else String.format("%.0f", metrics?.memUsed ?: 0.0),
-                    total = if ((metrics?.memUsed ?: 0.0) > 1024) " GB" else " MB",
-                    tint = McGold,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricItem(
-                    icon = Icons.Default.Computer,
-                    label = "CPU",
-                    value = String.format("%.0f%%", metrics?.cpuProcess ?: 0.0),
-                    tint = McRed,
-                    modifier = Modifier.weight(1f)
-                )
+            if (mode == "API") {
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    MetricItem(
+                        icon = Icons.Default.Memory,
+                        label = "内存",
+                        value = String.format("%.0f", metrics?.memUsed ?: 0.0),
+                        total = "MB",
+                        tint = Color(0xFF9C27B0),
+                        modifier = Modifier.weight(1f)
+                    )
+                    MetricItem(
+                        icon = Icons.Default.Computer,
+                        label = "CPU",
+                        value = String.format("%.0f", metrics?.cpuProcess ?: 0.0),
+                        total = "%",
+                        tint = Color(0xFFFF5722),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }

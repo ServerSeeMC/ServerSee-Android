@@ -1,9 +1,12 @@
 package cn.lemwood.ui.screens
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,13 +18,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import cn.lemwood.data.model.*
 import cn.lemwood.data.local.ServerEntity
 import cn.lemwood.ui.theme.*
 import cn.lemwood.ui.viewmodel.ServerViewModel
@@ -40,9 +45,16 @@ fun DetailScreen(
     
     LaunchedEffect(serverId, servers) {
         server = servers.find { it.id == serverId }
+        viewModel.setActiveServer(serverId)
     }
 
-    val hasToken = !server?.token.isNullOrBlank()
+    DisposableEffect(serverId) {
+        onDispose {
+            viewModel.setActiveServer(null)
+        }
+    }
+
+    val hasToken = !server?.token.isNullOrBlank() && server?.mode == "API"
     var selectedTab by remember { mutableIntStateOf(0) }
 
     Scaffold(
@@ -113,6 +125,9 @@ fun DetailScreen(
 fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
     val states by viewModel.serverStates.collectAsState()
     val state = server?.let { states[it.id] }
+    val metrics = state?.metrics
+    val status = state?.status
+    val isApiMode = server?.mode == "API"
     var showRaw by remember { mutableStateOf(false) }
 
     val iconUrl = remember(state?.status?.icon, server?.serverAddress, server?.useAddressForIcon) {
@@ -187,13 +202,32 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
                                 color = if (state?.status != null) McGreen else Color.Red,
                                 fontWeight = FontWeight.Medium
                             )
-                            if (state?.status != null) {
-                                Text(
-                                    text = " • ${state.status.version}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        }
+                    }
+                }
+                
+                if (state?.status != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Tag,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = state.status.version,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
                         }
                     }
                 }
@@ -279,41 +313,45 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
             }
         }
         
-        state?.metrics?.let { metrics ->
-            Text(
-                "性能监控",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 4.dp, top = 8.dp)
-            )
-            
-            // TPS & MSPT Row
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ModernMetricCard(
-                    label = "TPS (5s)",
-                    value = "%.2f".format(metrics.tps5s),
-                    icon = Icons.Default.Speed,
-                    color = when {
+        Text(
+            "性能监控",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+        )
+        
+        // TPS & MSPT Row
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ModernMetricCard(
+                label = "TPS (5s)",
+                value = if (isApiMode && metrics != null) "%.2f".format(metrics.tps5s) else "N/A",
+                icon = Icons.Default.Speed,
+                color = if (isApiMode && metrics != null) {
+                    when {
                         metrics.tps5s > 18 -> McGreen
                         metrics.tps5s > 15 -> McGold
                         else -> Color.Red
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-                ModernMetricCard(
-                    label = "MSPT",
-                    value = "%.1f ms".format(metrics.mspt),
-                    icon = Icons.Default.Timer,
-                    color = when {
+                    }
+                } else Color.Gray,
+                modifier = Modifier.weight(1f)
+            )
+            ModernMetricCard(
+                label = "MSPT",
+                value = if (isApiMode && metrics != null) "%.1f ms".format(metrics.mspt) else "N/A",
+                icon = Icons.Default.Timer,
+                color = if (isApiMode && metrics != null) {
+                    when {
                         metrics.mspt < 40 -> McGreen
                         metrics.mspt < 50 -> McGold
                         else -> Color.Red
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            
-            // Usage Progress Cards
+                    }
+                } else Color.Gray,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        
+        // Usage Progress Cards
+        if (isApiMode && metrics != null) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 UsageCard(
                     label = "CPU 使用率 (进程/系统)",
@@ -330,7 +368,7 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
                     icon = Icons.Default.DataUsage,
                     color = Color(0xFF9C27B0)
                 )
-                
+
                 if (metrics.hostMemUsed != null && metrics.hostMemTotal != null) {
                     UsageCard(
                         label = "主机内存",
@@ -340,7 +378,7 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
                         color = Color(0xFF2196F3)
                     )
                 }
-                
+
                 if (metrics.diskUsed != null && metrics.diskTotal != null) {
                     UsageCard(
                         label = "磁盘空间",
@@ -351,18 +389,59 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
                     )
                 }
             }
+        } else if (!isApiMode) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "当前模式仅支持基础状态监控",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        "如需查看 CPU、内存、TPS 趋势等详细指标，请在服务器安装 ServerSee 插件并使用 API 端点模式添加。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        }
+
+        // History Chart
+        if (isApiMode && state != null && state.history.isNotEmpty()) {
+            Text(
+                "TPS 历史趋势 (近1小时)",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+            )
+            MetricLineChart(
+                history = state.history,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
         
-        OutlinedButton(
-            onClick = { showRaw = !showRaw },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(if (showRaw) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(if (showRaw) "隐藏原始 JSON" else "查看原始数据")
+        if (isApiMode) {
+            OutlinedButton(
+                onClick = { showRaw = !showRaw },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(if (showRaw) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (showRaw) "隐藏原始 JSON" else "查看原始数据")
+            }
         }
         
         if (showRaw) {
@@ -380,6 +459,84 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
         }
         
         Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+fun MetricLineChart(
+    history: List<ServerMetrics>,
+    modifier: Modifier = Modifier
+) {
+    val tpsList = history.map { it.tps5s.toFloat() }
+    if (tpsList.isEmpty()) return
+
+    val maxTps = 20f
+    val minTps = 0f
+    
+    val mcGreen = McGreen
+    val mcGold = McGold
+    val mcRed = Color.Red
+
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Box(modifier = Modifier.padding(12.dp)) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                val spacing = width / (tpsList.size.coerceAtLeast(2) - 1)
+
+                // Draw Grid Lines
+                listOf(20f, 15f, 10f, 5f).forEach { tps ->
+                    val y = height - (tps / maxTps) * height
+                    drawLine(
+                        color = Color.LightGray.copy(alpha = 0.2f),
+                        start = androidx.compose.ui.geometry.Offset(0f, y),
+                        end = androidx.compose.ui.geometry.Offset(width, y),
+                        strokeWidth = 1.dp.toPx()
+                    )
+                }
+
+                val path = Path()
+                tpsList.forEachIndexed { index: Int, tps: Float ->
+                    val x = index * spacing
+                    val y = height - ((tps - minTps) / (maxTps - minTps)) * height
+                    if (index == 0) {
+                        path.moveTo(x, y)
+                    } else {
+                        path.lineTo(x, y)
+                    }
+                }
+
+                val chartColor = if (tpsList.last() > 18) mcGreen else if (tpsList.last() > 15) mcGold else mcRed
+
+                drawPath(
+                    path = path,
+                    color = chartColor,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+
+                // Fill area under the line
+                val fillPath = Path().apply {
+                    addPath(path)
+                    lineTo(width, height)
+                    lineTo(0f, height)
+                    close()
+                }
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            chartColor.copy(alpha = 0.3f),
+                            Color.Transparent
+                        )
+                    )
+                )
+            }
+        }
     }
 }
 
@@ -567,6 +724,17 @@ fun WhitelistContent(server: ServerEntity, viewModel: ServerViewModel) {
 @Composable
 fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
     var command by remember { mutableStateOf("") }
+    val serverStates by viewModel.serverStates.collectAsState()
+    val state = serverStates[server.id]
+    val logs = state?.logs ?: emptyList()
+    val listState = rememberLazyListState()
+
+    // 自动滚动到底部
+    LaunchedEffect(logs.size) {
+        if (logs.isNotEmpty()) {
+            listState.animateScrollToItem(logs.size - 1)
+        }
+    }
     
     Column(modifier = Modifier
         .padding(16.dp)
@@ -580,12 +748,29 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1C))
         ) {
             Box(modifier = Modifier.padding(12.dp).fillMaxSize()) {
-                Text(
-                    "Ready to send commands to ${server.name}...\n> ",
-                    color = Color(0xFF4CAF50),
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    fontSize = 13.sp
-                )
+                if (logs.isEmpty()) {
+                    Text(
+                        "Ready to send commands to ${server.name}...\n> ",
+                        color = Color(0xFF4CAF50),
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 13.sp
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(logs) { log ->
+                            Text(
+                                text = MinecraftTextParser.parse(log),
+                                color = Color(0xFFE0E0E0),
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
         

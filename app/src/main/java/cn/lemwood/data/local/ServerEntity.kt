@@ -10,5 +10,6 @@ data class ServerEntity(
     val endpoint: String,
     val token: String? = null,
     val serverAddress: String? = null,
-    val useAddressForIcon: Boolean = false
+    val useAddressForIcon: Boolean = false,
+    val mode: String = "API" // API, JAVA_ADDRESS, BEDROCK_ADDRESS
 )
