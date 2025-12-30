@@ -16,6 +16,8 @@ import kotlinx.coroutines.sync.withLock
 import okhttp3.*
 import java.util.*
 import java.util.concurrent.TimeUnit
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 class WebSocketClient(
     private val endpoint: String,
@@ -27,7 +29,9 @@ class WebSocketClient(
         .writeTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    private val gson = Gson()
+    private val gson = com.google.gson.GsonBuilder()
+        .disableHtmlEscaping()
+        .create()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var webSocket: WebSocket? = null
     
@@ -124,11 +128,28 @@ class WebSocketClient(
         ensureConnected()
         
         val requestId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis() / 1000
+        val nonce = UUID.randomUUID().toString().substring(0, 8)
+        val dataJson = if (data != null) gson.toJson(data) else ""
+
         val request = JsonObject().apply {
             addProperty("id", requestId)
             addProperty("type", "request")
             addProperty("action", action)
-            if (token != null) addProperty("token", token)
+            
+            if (token != null) {
+                // 不再直接发送 token，而是发送签名
+                val dataToSign = action + timestamp + nonce + dataJson
+                val signature = calculateHMAC(dataToSign, token)
+                
+                addProperty("timestamp", timestamp)
+                addProperty("nonce", nonce)
+                addProperty("signature", signature)
+
+                Log.d("WebSocketClient", "Signing: action=$action, ts=$timestamp, nonce=$nonce, data=$dataJson")
+                Log.d("WebSocketClient", "Signature: $signature")
+            }
+
             if (data != null) {
                 add("data", gson.toJsonTree(data))
             }
@@ -149,6 +170,18 @@ class WebSocketClient(
             if (it.get("success")?.asBoolean == false) {
                 throw Exception(it.get("message")?.asString ?: "Unknown error")
             }
+        }
+    }
+
+    private fun calculateHMAC(data: String, key: String): String {
+        val secretKeySpec = SecretKeySpec(key.toByteArray(Charsets.UTF_8), "HmacSHA256")
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(secretKeySpec)
+        val rawHmac = mac.doFinal(data.toByteArray(Charsets.UTF_8))
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            Base64.getEncoder().encodeToString(rawHmac)
+        } else {
+            android.util.Base64.encodeToString(rawHmac, android.util.Base64.NO_WRAP)
         }
     }
 

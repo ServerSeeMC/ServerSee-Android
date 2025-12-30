@@ -54,11 +54,26 @@
     - **结果**: 进一步降低了插件体积，提升了兼容性，无需用户预装 Spark 插件。
 - **WebSocket 通信方案**:
     - **架构**: 全面废弃 HTTP RESTful API，采用 WebSocket 承载所有请求与响应。
-    - **协议**: 使用自定义 JSON 协议，包含 `id` (请求唯一标识)、`type` (request/response/push)、`action` (操作类型) 和 `token` (鉴权)。
+    - **协议**: 使用自定义 JSON 协议，包含 `id` (请求唯一标识)、`type` (request/response/push)、`action` (操作类型)。
+    - **安全鉴权**: 采用 **HMAC-SHA256 签名机制**。Token 作为共享密钥不直接传输。请求需包含 `timestamp` (校验 60s 偏移) 和 `nonce` (随机数)，签名公式：`signature = HMAC_SHA256(Token, action + timestamp + nonce + data_json)`。
     - **前端实现**: `WebSocketClient` 封装了连接池、请求超时处理、以及基于 `SharedFlow` 的实时推送订阅。
-    - **后端实现**: `ApiServer` 继承 `WebSocketServer`，支持并发处理、速率限制和基于 Token 的权限校验。
-    - **优势**: 降低了握手开销，支持真正的实时日志推送，并大幅缩小了依赖体积。
+    - **后端实现**: `ApiServer` 继承 `WebSocketServer`，支持并发处理、速率限制和基于 HMAC 签名的权限校验（兼容旧版明文 Token 校验）。
+    - **优势**: 降低了握手开销，支持真正的实时日志推送，大幅提升了 Token 传输安全性，并缩小了依赖体积。
 - **版本兼容性 (1.13+)**:
     - **编译配置**: 插件已调整为支持 Minecraft 1.13 及以上版本。使用 Java 11 编译，并依赖 `com.destroystokyo.paper:paper-api:1.13.2-R0.1-SNAPSHOT`。
     - **日志采集**: 实现了双重日志捕获机制。优先尝试使用 `Log4j2` (适用于 1.12+ 核心)，若不可用则回退至 `java.util.logging (JUL)`，确保在不同核心和版本下均能实时推送日志。
-    - **API 版本**: `plugin.yml` 中 `api-version` 已设为 `1.13`，确保跨版本兼容性。
+- **终端交互优化**:
+    - **回车发送**: 指令输入框支持按下 Enter 键直接发送指令。
+    - **日志复制**: 支持长按单行日志复制到剪贴板，以及一键复制控制台当前所有缓存日志。
+    - **ANSI 颜色**: 支持解析 ANSI 转义码（如 `\u001b[31m`），使终端输出能正确显示系统日志的颜色。
+    - **API 版本**: `plugin.yml`中`api-version`已设为`1.13`，确保跨版本兼容性。
+- **JSON 序列化一致性**: 为了确保 HMAC 签名计算在不同端（Android/Java）的一致性，统一使用 `disableHtmlEscaping()` 配置 Gson 实例，防止 HTML 字符转义导致签名不匹配。
+- **Unauthorized 异常修复**: 
+    - **WebSocket 客户端缓存**: `ServerRepository` 采用 `endpoint|token` 作为缓存键，确保不同 Token 的服务器连接实例完全隔离。
+    - **鉴权逻辑优化**: 轮询 `metrics` 时仅在有 Token 时发起请求，并在 `getHistory` 中补齐了 Token 参数以支持详情页鉴权。
+- **崩溃处理机制**:
+    - **全局捕获**: 实现了 `GlobalCrashHandler`，通过 `UncaughtExceptionHandler` 拦截所有未处理异常。
+    - **独立进程**: 崩溃页面 `CrashActivity` 运行在 `:crash` 独立进程中，确保在主进程崩溃时仍能稳定显示。
+    - **功能集成**: 崩溃页面提供错误堆栈详情展示、一键重启应用、复制崩溃日志到剪贴板以及安全退出应用的功能。
+    - **初始化**: 在自定义 `ServerSeeApp` 类中完成全局初始化。
+- **更新检查 (插件端)**: 插件启动时会异步请求 GitHub API (`ServerSeeMC/ServerSee-Plugin`) 获取最新 Release 标签，并与本地版本进行语义化比较，若有新版本则在控制台输出更新提醒。

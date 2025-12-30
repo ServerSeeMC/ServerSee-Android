@@ -31,11 +31,12 @@ class ServerRepository(private val serverDao: ServerDao) {
         .retryOnConnectionFailure(true)
         .build()
 
-    // WebSocket 客户端缓存 (endpoint -> WebSocketClient)
+    // WebSocket 客户端缓存 (endpoint + token -> WebSocketClient)
     private val wsClients = ConcurrentHashMap<String, WebSocketClient>()
 
     private fun getWsClient(endpoint: String, token: String? = null): WebSocketClient {
-        return wsClients.getOrPut(endpoint) {
+        val key = "$endpoint|$token"
+        return wsClients.getOrPut(key) {
             WebSocketClient(endpoint, token)
         }
     }
@@ -45,7 +46,8 @@ class ServerRepository(private val serverDao: ServerDao) {
     }
 
     suspend fun deleteServer(server: ServerEntity) {
-        wsClients.remove(server.endpoint)?.close()
+        val key = "${server.endpoint}|${server.token}"
+        wsClients.remove(key)?.close()
         serverDao.deleteServer(server)
     }
 
@@ -91,7 +93,7 @@ class ServerRepository(private val serverDao: ServerDao) {
                 val onlinePlayers = playersObj?.optInt("online", 0) ?: 0
                 val maxPlayers = playersObj?.optInt("max", 0) ?: 0
                 val version = json.optString("version", "Unknown")
-                val icon = json.optString("icon", null)
+                val icon = if (json.has("icon")) json.getString("icon") else null
                 
                 return ServerStatus(
                     online = true,
@@ -138,8 +140,8 @@ class ServerRepository(private val serverDao: ServerDao) {
         return gson.toJson(response.get("data"))
     }
 
-    suspend fun getHistory(endpoint: String, limit: Int = 60): List<ServerMetrics> {
-        val response = getWsClient(endpoint).sendRequest("history", mapOf("limit" to limit))
+    suspend fun getHistory(endpoint: String, token: String? = null, limit: Int = 60): List<ServerMetrics> {
+        val response = getWsClient(endpoint, token).sendRequest("history", mapOf("limit" to limit))
         val type = object : TypeToken<List<ServerMetrics>>() {}.type
         return gson.fromJson(response.get("data"), type)
     }

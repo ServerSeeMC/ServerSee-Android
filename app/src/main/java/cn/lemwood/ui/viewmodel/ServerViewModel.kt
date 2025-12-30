@@ -61,17 +61,21 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
 
     private fun startLogSync(server: ServerEntity) {
         logJob = viewModelScope.launch {
-            // 清空旧日志
+            // 清空旧日志，避免切换服务器时看到之前的日志
             _serverStates.value = _serverStates.value.toMutableMap().apply {
-                put(server.id, (get(server.id) ?: ServerUIState()).copy(logs = emptyList()))
+                val currentState = get(server.id) ?: ServerUIState()
+                put(server.id, currentState.copy(logs = emptyList()))
             }
             
             repository.getLogStream(server.endpoint, server.token!!)
                 .collect { logLine ->
                     _serverStates.value = _serverStates.value.toMutableMap().apply {
                         val currentState = get(server.id) ?: ServerUIState()
-                        val newLogs = (currentState.logs + logLine).takeLast(200) // 最多保留 200 行
-                        put(server.id, currentState.copy(logs = newLogs))
+                        // 改进的去重逻辑：检查最后 5 行是否包含当前行
+                        if (!currentState.logs.takeLast(5).contains(logLine)) {
+                            val newLogs = (currentState.logs + logLine).takeLast(500)
+                            put(server.id, currentState.copy(logs = newLogs))
+                        }
                     }
                 }
         }
@@ -139,16 +143,26 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
     private suspend fun refreshServer(server: ServerEntity) {
         try {
             val status = repository.getServerStatus(server.endpoint, server.token, server.mode)
-            val metrics = if (server.mode == "API") {
-                repository.getServerMetrics(server.endpoint, server.token)
+            val hasToken = !server.token.isNullOrBlank()
+            
+            val metrics = if (server.mode == "API" && hasToken) {
+                try {
+                    repository.getServerMetrics(server.endpoint, server.token)
+                } catch (e: Exception) {
+                    null
+                }
             } else {
                 null
             }
             
             // 只有活跃服务器且是 API 模式才获取历史记录和原始数据
             val isActive = _activeServerId.value == server.id
-            val history = if (isActive && server.mode == "API") {
-                try { repository.getHistory(server.endpoint) } catch (e: Exception) { emptyList() }
+            val history = if (isActive && server.mode == "API" && hasToken) {
+                try { 
+                    repository.getHistory(server.endpoint, server.token) 
+                } catch (e: Exception) { 
+                    emptyList() 
+                }
             } else {
                 _serverStates.value[server.id]?.history ?: emptyList()
             }
@@ -157,7 +171,7 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
                 try { repository.getServerStatusRaw(server.endpoint, server.token, server.mode) } catch (e: Exception) { e.message }
             } else null
             
-            val rawMetrics = if (isActive && server.mode == "API") {
+            val rawMetrics = if (isActive && server.mode == "API" && hasToken) {
                 try { repository.getServerMetricsRaw(server.endpoint, server.token) } catch (e: Exception) { e.message }
             } else null
 
@@ -168,12 +182,14 @@ class ServerViewModel(private val repository: ServerRepository) : ViewModel() {
                     metrics = metrics,
                     history = history,
                     rawStatus = rawStatus,
-                    rawMetrics = rawMetrics
+                    rawMetrics = rawMetrics,
+                    lastError = null // 成功时清除之前的错误
                 ))
             }
         } catch (e: Exception) {
             _serverStates.value = _serverStates.value.toMutableMap().apply {
-                put(server.id, ServerUIState(
+                val currentState = get(server.id) ?: ServerUIState()
+                put(server.id, currentState.copy(
                     lastError = e.message ?: "Unknown error"
                 ))
             }

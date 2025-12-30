@@ -2,7 +2,10 @@ package cn.lemwood.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,7 +25,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -33,6 +39,9 @@ import cn.lemwood.ui.theme.*
 import cn.lemwood.ui.viewmodel.ServerViewModel
 import cn.lemwood.utils.MinecraftTextParser
 import coil.compose.AsyncImage
+import android.widget.Toast
+import androidx.compose.ui.input.key.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -721,6 +730,7 @@ fun WhitelistContent(server: ServerEntity, viewModel: ServerViewModel) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
     var command by remember { mutableStateOf("") }
@@ -729,7 +739,10 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
     val logs = state?.logs ?: emptyList()
     val listState = rememberLazyListState()
     var autoScroll by remember { mutableStateOf(true) }
-
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
     // 自动滚动到底部
     LaunchedEffect(logs.size, autoScroll) {
         if (autoScroll && logs.isNotEmpty()) {
@@ -748,6 +761,13 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
             Text("控制台终端", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             
             Row {
+                IconButton(onClick = { 
+                    val allLogs = logs.joinToString("\n")
+                    clipboardManager.setText(AnnotatedString(allLogs))
+                    Toast.makeText(context, "已复制全部日志", Toast.LENGTH_SHORT).show()
+                }) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "复制全部", tint = MaterialTheme.colorScheme.primary)
+                }
                 IconButton(onClick = { autoScroll = !autoScroll }) {
                     Icon(
                         if (autoScroll) Icons.Default.VerticalAlignBottom else Icons.Default.VerticalAlignTop,
@@ -783,12 +803,22 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(logs) { log ->
+                            val parsedLog = MinecraftTextParser.parse(log)
                             Text(
-                                text = MinecraftTextParser.parse(log),
+                                text = parsedLog,
                                 color = Color(0xFFE0E0E0),
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                 fontSize = 12.sp,
-                                modifier = Modifier.padding(vertical = 1.dp)
+                                modifier = Modifier
+                                    .padding(vertical = 1.dp)
+                                    .combinedClickable(
+                                        onClick = {},
+                                        onLongClick = {
+                                            clipboardManager.setText(AnnotatedString(log))
+                                            Toast.makeText(context, "已复制该行日志", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                    .fillMaxWidth()
                             )
                         }
                     }
@@ -801,9 +831,26 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = command,
-                onValueChange = { command = it },
+                onValueChange = { 
+                    command = it 
+                },
                 label = { Text("输入指令 (无需 /)") },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onKeyEvent { keyEvent ->
+                        if (keyEvent.type == KeyEventType.KeyDown) {
+                            when (keyEvent.key) {
+                                Key.Enter -> {
+                                    if (command.isNotBlank()) {
+                                        viewModel.executeCommand(server.id, command)
+                                        command = ""
+                                    }
+                                    true
+                                }
+                                else -> false
+                            }
+                        } else false
+                    },
                 shape = RoundedCornerShape(12.dp),
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Default.ChevronRight, contentDescription = null) },
