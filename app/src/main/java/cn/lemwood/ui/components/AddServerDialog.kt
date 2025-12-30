@@ -182,13 +182,23 @@ fun AddServerDialog(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (testedStatus.icon != null) {
+                            val previewIcon = remember(testedStatus?.icon, serverAddress, useAddressForIcon) {
+                                if (!testedStatus?.icon.isNullOrBlank()) {
+                                    testedStatus?.icon
+                                } else if (useAddressForIcon && !serverAddress.isNullOrBlank()) {
+                                    "https://api.mcsrvstat.us/icon/$serverAddress"
+                                } else {
+                                    null
+                                }
+                            }
+                            if (previewIcon != null) {
                                 AsyncImage(
-                                    model = testedStatus.icon,
+                                    model = previewIcon,
                                     contentDescription = null,
                                     modifier = Modifier
                                         .size(40.dp)
-                                        .clip(RoundedCornerShape(4.dp))
+                                        .clip(RoundedCornerShape(4.dp)),
+                                    error = androidx.compose.ui.graphics.painter.ColorPainter(MaterialTheme.colorScheme.primaryContainer)
                                 )
                             } else {
                                 Icon(

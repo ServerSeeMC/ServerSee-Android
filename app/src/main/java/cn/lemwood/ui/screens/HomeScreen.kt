@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,7 +28,8 @@ import cn.lemwood.ui.viewmodel.ServerViewModel
 @Composable
 fun HomeScreen(
     viewModel: ServerViewModel,
-    onServerClick: (Int) -> Unit
+    onServerClick: (Int) -> Unit,
+    onSettingsClick: () -> Unit
 ) {
     val servers by viewModel.servers.collectAsState(initial = emptyList())
     val serverStates by viewModel.serverStates.collectAsState()
@@ -35,33 +37,58 @@ fun HomeScreen(
 
     // Statistics calculations
     val totalServers = servers.size
-    val offlineServers = servers.size - serverStates.values.count { it.status != null && it.lastError == null }
-    val totalPlayers = serverStates.values.sumOf { it.status?.players ?: 0 }
+    val onlineServers = servers.count { server ->
+        val state = serverStates[server.id]
+        state?.status != null && state.lastError == null
+    }
+    val offlineServers = (totalServers - onlineServers).coerceAtLeast(0)
+    val totalPlayers = servers.sumOf { server -> 
+        serverStates[server.id]?.status?.players ?: 0 
+    }
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val bgType by viewModel.backgroundType.collectAsState()
 
     Scaffold(
+        containerColor = if (bgType != "none") Color.Transparent else MaterialTheme.colorScheme.background,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             "ServerSee 客户端", 
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.ExtraBold,
+                            style = MaterialTheme.typography.titleLarge
                         )
                         Text(
-                            "监控面板", 
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            "监控面板 • ${if (offlineServers == 0) "全部在线" else "${offlineServers}台离线"}", 
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (offlineServers == 0) McGreen else MaterialTheme.colorScheme.error
                         )
                     }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.refreshAll() }) {
-                        Icon(
-                            Icons.Default.Refresh, 
-                            contentDescription = "手动刷新"
-                        )
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
-                }
+                    IconButton(onClick = { viewModel.refreshAll() }) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Refresh, 
+                                contentDescription = "手动刷新"
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = if (bgType != "none") Color.Transparent else MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                )
             )
         },
         floatingActionButton = {
@@ -86,9 +113,9 @@ fun HomeScreen(
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                StatItem(label = "总数", value = "$totalServers", color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                StatItem(label = "离线", value = "$offlineServers", color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                StatItem(label = "玩家", value = "$totalPlayers", color = McGold, modifier = Modifier.weight(1f))
+                StatItem(label = "总数", value = "$totalServers", color = MaterialTheme.colorScheme.primary, bgType = bgType, modifier = Modifier.weight(1f))
+                StatItem(label = "离线", value = "$offlineServers", color = MaterialTheme.colorScheme.error, bgType = bgType, modifier = Modifier.weight(1f))
+                StatItem(label = "玩家", value = "$totalPlayers", color = McGold, bgType = bgType, modifier = Modifier.weight(1f))
             }
 
             if (servers.isEmpty()) {
@@ -131,7 +158,8 @@ fun HomeScreen(
                             useAddressForIcon = server.useAddressForIcon,
                             mode = server.mode,
                             onClick = { onServerClick(server.id) },
-                            onDelete = { viewModel.deleteServer(server) }
+                            onDelete = { viewModel.deleteServer(server) },
+                            bgType = bgType
                         )
                     }
                 }
@@ -162,20 +190,34 @@ fun HomeScreen(
 }
 
 @Composable
-fun StatItem(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 8.dp, vertical = 12.dp)
-    ) {
-        Text(text = label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(
-            text = value, 
-            fontSize = 20.sp, 
-            fontWeight = FontWeight.Bold, 
-            color = color
+fun StatItem(label: String, value: String, color: Color, bgType: String = "none", modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = if (bgType != "none") MaterialTheme.colorScheme.surface.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surface,
+        tonalElevation = if (bgType != "none") 0.dp else 2.dp,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, 
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (bgType != "none") 0.2f else 0.3f)
         )
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 14.dp)
+        ) {
+            Text(
+                text = label, 
+                fontSize = 11.sp, 
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = value, 
+                fontSize = 22.sp, 
+                fontWeight = FontWeight.ExtraBold, 
+                color = color
+            )
+        }
     }
 }

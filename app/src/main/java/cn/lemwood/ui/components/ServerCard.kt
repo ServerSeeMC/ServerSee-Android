@@ -34,15 +34,18 @@ fun ServerCard(
     useAddressForIcon: Boolean = false,
     mode: String = "API",
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    bgType: String = "none"
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val iconUrl = remember(status?.icon, serverAddress, useAddressForIcon) {
-        if (useAddressForIcon && !serverAddress.isNullOrBlank()) {
+        if (!status?.icon.isNullOrBlank()) {
+            status?.icon
+        } else if (useAddressForIcon && !serverAddress.isNullOrBlank()) {
             "https://api.mcsrvstat.us/icon/$serverAddress"
         } else {
-            status?.icon
+            null
         }
     }
 
@@ -79,11 +82,12 @@ fun ServerCard(
                     onLongPress = { showDeleteConfirm = true }
                 )
             },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = if (bgType != "none") MaterialTheme.colorScheme.surface.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (bgType != "none") 0.dp else 2.dp),
+        border = if (bgType != "none") androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Header: Icon, Name, Status Badge
@@ -97,7 +101,8 @@ fun ServerCard(
                         contentDescription = null,
                         modifier = Modifier
                             .size(48.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(8.dp)),
+                        error = androidx.compose.ui.graphics.painter.ColorPainter(MaterialTheme.colorScheme.primaryContainer)
                     )
                 } else {
                     Box(

@@ -1,9 +1,11 @@
 package cn.lemwood.data.repository
 
+import cn.lemwood.data.api.MinecraftPing
 import cn.lemwood.data.api.McStatApi
 import cn.lemwood.data.api.WebSocketClient
 import cn.lemwood.data.local.ServerDao
 import cn.lemwood.data.local.ServerEntity
+import cn.lemwood.data.model.HistoricalMetrics
 import cn.lemwood.data.model.ServerMetrics
 import cn.lemwood.data.model.ServerStatus
 import cn.lemwood.data.model.WhitelistResponse
@@ -29,7 +31,17 @@ class ServerRepository(private val serverDao: ServerDao) {
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", "ServerSee-Android/1.0.0")
+                .build()
+            chain.proceed(request)
+        }
         .build()
+
+    // 状态缓存 (endpoint -> Pair<ServerStatus, Timestamp>)
+    private val statusCache = ConcurrentHashMap<String, Pair<ServerStatus, Long>>()
+    private val CACHE_TTL = 30000L // 30秒缓存
 
     // WebSocket 客户端缓存 (endpoint + token -> WebSocketClient)
     private val wsClients = ConcurrentHashMap<String, WebSocketClient>()
@@ -75,39 +87,65 @@ class ServerRepository(private val serverDao: ServerDao) {
             val response = getWsClient(endpoint, token).sendRequest("status")
             return gson.fromJson(response.get("data"), ServerStatus::class.java)
         } else {
-            val response = if (mode == "JAVA_ADDRESS") {
-                getMcStatApi().getJavaStatus(endpoint)
-            } else {
-                getMcStatApi().getBedrockStatus(endpoint)
+            // 尝试从缓存获取
+            val cached = statusCache[endpoint]
+            if (cached != null && System.currentTimeMillis() - cached.second < CACHE_TTL) {
+                return cached.first
             }
-            
-            if (response.isSuccessful) {
-                val body = response.body()?.string() ?: throw Exception("Empty body")
-                val json = JSONObject(body)
-                val online = json.optBoolean("online", false)
-                if (!online) throw Exception("服务器离线")
-                
-                val motdObj = json.optJSONObject("motd")
-                val motdClean = motdObj?.optJSONArray("clean")?.optString(0) ?: "Minecraft Server"
-                val playersObj = json.optJSONObject("players")
-                val onlinePlayers = playersObj?.optInt("online", 0) ?: 0
-                val maxPlayers = playersObj?.optInt("max", 0) ?: 0
-                val version = json.optString("version", "Unknown")
-                val icon = if (json.has("icon")) json.getString("icon") else null
-                
-                return ServerStatus(
-                    online = true,
-                    motd = motdClean,
-                    players = onlinePlayers,
-                    maxPlayers = maxPlayers,
-                    version = version,
-                    icon = icon,
-                    bukkitVersion = "Unknown",
-                    gamemode = "Unknown",
-                    plugins = emptyList()
-                )
-            } else {
-                throw Exception("API Error: ${response.code()}")
+
+            return try {
+                val (address, port) = parseAddress(endpoint, if (mode == "JAVA_ADDRESS") 25565 else 19132)
+                val status = if (mode == "JAVA_ADDRESS") {
+                    MinecraftPing.getJavaStatus(address, port)
+                } else {
+                    MinecraftPing.getBedrockStatus(address, port)
+                }
+                statusCache[endpoint] = status to System.currentTimeMillis()
+                status
+            } catch (e: Exception) {
+                // 如果本地解析失败，回退到 API (作为备选方案)
+                try {
+                    val response = if (mode == "JAVA_ADDRESS") {
+                        getMcStatApi().getJavaStatus(endpoint)
+                    } else {
+                        getMcStatApi().getBedrockStatus(endpoint)
+                    }
+                    
+                    if (response.isSuccessful) {
+                        val body = response.body()?.string() ?: throw Exception("Empty body")
+                        val json = JSONObject(body)
+                        val online = json.optBoolean("online", false)
+                        if (!online) throw Exception("服务器离线")
+                        
+                        val motdObj = json.optJSONObject("motd")
+                        val motdClean = motdObj?.optJSONArray("clean")?.optString(0) ?: "Minecraft Server"
+                        val playersObj = json.optJSONObject("players")
+                        val onlinePlayers = playersObj?.optInt("online", 0) ?: 0
+                        val maxPlayers = playersObj?.optInt("max", 0) ?: 0
+                        val version = json.optString("version", "Unknown")
+                        val icon = if (json.has("icon") && !json.isNull("icon")) {
+                            if (json.get("icon") is String) json.getString("icon") else null
+                        } else null
+                        
+                        val status = ServerStatus(
+                            online = true,
+                            motd = motdClean,
+                            players = onlinePlayers,
+                            maxPlayers = maxPlayers,
+                            version = version,
+                            icon = icon,
+                            bukkitVersion = "Unknown",
+                            gamemode = if (mode == "BEDROCK_ADDRESS") "Bedrock" else "Survival",
+                            plugins = emptyList()
+                        )
+                        statusCache[endpoint] = status to System.currentTimeMillis()
+                        status
+                    } else {
+                        throw Exception("Local ping failed and API returned ${response.code()}")
+                    }
+                } catch (apiEx: Exception) {
+                    throw Exception("解析失败: ${e.message}")
+                }
             }
         }
     }
@@ -117,16 +155,23 @@ class ServerRepository(private val serverDao: ServerDao) {
             val response = getWsClient(endpoint, token).sendRequest("status")
             return gson.toJson(response.get("data"))
         } else {
-            val response = if (mode == "JAVA_ADDRESS") {
-                getMcStatApi().getJavaStatus(endpoint)
-            } else {
-                getMcStatApi().getBedrockStatus(endpoint)
+            return try {
+                val status = getServerStatus(endpoint, token, mode)
+                gson.toJson(status)
+            } catch (e: Exception) {
+                "Error: ${e.message}"
             }
-            return if (response.isSuccessful) {
-                response.body()?.string() ?: "Empty body"
-            } else {
-                "Error ${response.code()}: ${response.errorBody()?.string() ?: "Unknown error"}"
-            }
+        }
+    }
+
+    private fun parseAddress(endpoint: String, defaultPort: Int): Pair<String, Int> {
+        return if (endpoint.contains(":")) {
+            val parts = endpoint.split(":")
+            val address = parts[0]
+            val port = parts[1].toIntOrNull() ?: defaultPort
+            address to port
+        } else {
+            endpoint to defaultPort
         }
     }
 
@@ -140,9 +185,9 @@ class ServerRepository(private val serverDao: ServerDao) {
         return gson.toJson(response.get("data"))
     }
 
-    suspend fun getHistory(endpoint: String, token: String? = null, limit: Int = 60): List<ServerMetrics> {
+    suspend fun getHistory(endpoint: String, token: String? = null, limit: Int = 60): List<HistoricalMetrics> {
         val response = getWsClient(endpoint, token).sendRequest("history", mapOf("limit" to limit))
-        val type = object : TypeToken<List<ServerMetrics>>() {}.type
+        val type = object : TypeToken<List<HistoricalMetrics>>() {}.type
         return gson.fromJson(response.get("data"), type)
     }
 

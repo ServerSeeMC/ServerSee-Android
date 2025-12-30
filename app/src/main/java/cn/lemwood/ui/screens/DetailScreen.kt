@@ -66,14 +66,39 @@ fun DetailScreen(
 
     val hasToken = !server?.token.isNullOrBlank() && server?.mode == "API"
     var selectedTab by remember { mutableIntStateOf(0) }
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val bgType by viewModel.backgroundType.collectAsState()
 
     Scaffold(
+        containerColor = if (bgType != "none") Color.Transparent else MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(server?.name ?: "服务器详情", fontWeight = FontWeight.Bold) },
+                title = { 
+                    Column {
+                        Text(server?.name ?: "服务器详情", fontWeight = FontWeight.ExtraBold)
+                        if (server != null) {
+                            Text(
+                                server!!.endpoint.replace("http://", "").replace("https://", ""),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { 
+                        server?.let { viewModel.refreshAll() } 
+                    }) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -85,8 +110,8 @@ fun DetailScreen(
         bottomBar = {
             if (hasToken) {
                 NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 8.dp
+                    containerColor = if (bgType != "none") Color.Transparent else MaterialTheme.colorScheme.surface,
+                    tonalElevation = if (bgType != "none") 0.dp else 8.dp
                 ) {
                     NavigationBarItem(
                         selected = selectedTab == 0,
@@ -114,12 +139,16 @@ fun DetailScreen(
             .padding(padding)
             .fillMaxSize()
             .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
-                        MaterialTheme.colorScheme.surface
+                if (bgType == "none") {
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+                            MaterialTheme.colorScheme.surface
+                        )
                     )
-                )
+                } else {
+                    Brush.verticalGradient(colors = listOf(Color.Transparent, Color.Transparent))
+                }
             )
         ) {
             when (selectedTab) {
@@ -134,16 +163,19 @@ fun DetailScreen(
 @Composable
 fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
     val states by viewModel.serverStates.collectAsState()
+    val bgType by viewModel.backgroundType.collectAsState()
     val state = server?.let { states[it.id] }
     val metrics = state?.metrics
     val isApiMode = server?.mode == "API"
     var showRaw by remember { mutableStateOf(false) }
 
     val iconUrl = remember(state?.status?.icon, server?.serverAddress, server?.useAddressForIcon) {
-        if (server?.useAddressForIcon == true && !server.serverAddress.isNullOrBlank()) {
+        if (!state?.status?.icon.isNullOrBlank()) {
+            state?.status?.icon
+        } else if (server?.useAddressForIcon == true && !server.serverAddress.isNullOrBlank()) {
             "https://api.mcsrvstat.us/icon/${server.serverAddress}"
         } else {
-            state?.status?.icon
+            null
         }
     }
     
@@ -177,7 +209,8 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
                             AsyncImage(
                                 model = iconUrl,
                                 contentDescription = null,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize(),
+                                error = androidx.compose.ui.graphics.painter.ColorPainter(MaterialTheme.colorScheme.primaryContainer)
                             )
                         } else {
                             Icon(
@@ -332,77 +365,84 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
         // TPS & MSPT Row
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ModernMetricCard(
-                label = "TPS (5s)",
-                value = if (isApiMode && metrics != null) "%.2f".format(metrics.tps5s) else "N/A",
-                icon = Icons.Default.Speed,
-                color = if (isApiMode && metrics != null) {
-                    when {
-                        metrics.tps5s > 18 -> McGreen
-                        metrics.tps5s > 15 -> McGold
-                        else -> Color.Red
-                    }
-                } else Color.Gray,
-                modifier = Modifier.weight(1f)
-            )
-            ModernMetricCard(
-                label = "MSPT",
-                value = if (isApiMode && metrics != null) "%.1f ms".format(metrics.mspt) else "N/A",
-                icon = Icons.Default.Timer,
-                color = if (isApiMode && metrics != null) {
-                    when {
-                        metrics.mspt < 40 -> McGreen
-                        metrics.mspt < 50 -> McGold
-                        else -> Color.Red
-                    }
-                } else Color.Gray,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        
-        // Usage Progress Cards
-        if (isApiMode && metrics != null) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                UsageCard(
-                    label = "CPU 使用率 (进程/系统)",
-                    value = "${"%.0f".format(metrics.cpuProcess)}% / ${"%.0f".format(metrics.cpuSystem)}%",
-                    progress = (metrics.cpuProcess / 100).toFloat().coerceIn(0f, 1f),
-                    icon = Icons.Default.Memory,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                
-                UsageCard(
-                    label = "JVM 内存 (已用/最大)",
-                    value = "${"%.0f".format(metrics.memUsed)}MB / ${"%.0f".format(metrics.memMax)}MB",
-                    progress = (metrics.memUsed / metrics.memMax).toFloat().coerceIn(0f, 1f),
-                    icon = Icons.Default.DataUsage,
-                    color = Color(0xFF9C27B0)
-                )
-
-                if (metrics.hostMemUsed != null && metrics.hostMemTotal != null) {
-                    UsageCard(
-                        label = "主机内存",
-                        value = "${"%.1f".format(metrics.hostMemUsed / 1024)}GB / ${"%.1f".format(metrics.hostMemTotal / 1024)}GB",
-                        progress = (metrics.hostMemUsed / metrics.hostMemTotal).toFloat().coerceIn(0f, 1f),
-                        icon = Icons.Default.Storage,
-                        color = Color(0xFF2196F3)
-                    )
+            label = "TPS (5s)",
+            value = if (isApiMode && metrics != null) "%.2f".format(metrics.tps5s) else "N/A",
+            icon = Icons.Default.Speed,
+            color = if (isApiMode && metrics != null) {
+                when {
+                    metrics.tps5s > 18 -> McGreen
+                    metrics.tps5s > 15 -> McGold
+                    else -> Color.Red
                 }
-
-                if (metrics.diskUsed != null && metrics.diskTotal != null) {
-                    UsageCard(
-                        label = "磁盘空间",
-                        value = "${"%.1f".format(metrics.diskUsed)}GB / ${"%.1f".format(metrics.diskTotal)}GB",
-                        progress = (metrics.diskUsed / metrics.diskTotal).toFloat().coerceIn(0f, 1f),
-                        icon = Icons.Default.Save,
-                        color = Color(0xFF607D8B)
-                    )
+            } else Color.Gray,
+            bgType = bgType,
+            modifier = Modifier.weight(1f)
+        )
+        ModernMetricCard(
+            label = "MSPT",
+            value = if (isApiMode && metrics != null) "%.1f ms".format(metrics.mspt) else "N/A",
+            icon = Icons.Default.Timer,
+            color = if (isApiMode && metrics != null) {
+                when {
+                    metrics.mspt < 40 -> McGreen
+                    metrics.mspt < 50 -> McGold
+                    else -> Color.Red
                 }
+            } else Color.Gray,
+            bgType = bgType,
+            modifier = Modifier.weight(1f)
+        )
+    }
+    
+    // Usage Progress Cards
+    if (isApiMode && metrics != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            UsageCard(
+                label = "CPU 使用率 (进程/系统)",
+                value = "${ "%.0f".format(metrics.cpuProcess) }% / ${ "%.0f".format(metrics.cpuSystem) }%",
+                progress = (metrics.cpuProcess / 100).toFloat().coerceIn(0f, 1f),
+                icon = Icons.Default.Memory,
+                color = MaterialTheme.colorScheme.primary,
+                bgType = bgType
+            )
+            
+            UsageCard(
+                label = "JVM 内存 (已用/最大)",
+                value = "${ "%.0f".format(metrics.memUsed) }MB / ${ "%.0f".format(metrics.memMax) }MB",
+                progress = (metrics.memUsed / metrics.memMax).toFloat().coerceIn(0f, 1f),
+                icon = Icons.Default.DataUsage,
+                color = Color(0xFF9C27B0),
+                bgType = bgType
+            )
+
+            if (metrics.hostMemUsed != null && metrics.hostMemTotal != null) {
+                UsageCard(
+                    label = "主机内存",
+                    value = "${ "%.1f".format(metrics.hostMemUsed / 1024) }GB / ${ "%.1f".format(metrics.hostMemTotal / 1024) }GB",
+                    progress = (metrics.hostMemUsed / metrics.hostMemTotal).toFloat().coerceIn(0f, 1f),
+                    icon = Icons.Default.Storage,
+                    color = Color(0xFF2196F3),
+                    bgType = bgType
+                )
             }
+
+            if (metrics.diskUsed != null && metrics.diskTotal != null) {
+                UsageCard(
+                    label = "磁盘空间",
+                    value = "${ "%.1f".format(metrics.diskUsed) }GB / ${ "%.1f".format(metrics.diskTotal) }GB",
+                    progress = (metrics.diskUsed / metrics.diskTotal).toFloat().coerceIn(0f, 1f),
+                    icon = Icons.Default.Save,
+                    color = Color(0xFF607D8B),
+                    bgType = bgType
+                )
+            }
+        }
         } else if (!isApiMode) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                colors = CardDefaults.cardColors(containerColor = if (bgType != "none") MaterialTheme.colorScheme.surface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                border = if (bgType != "none") androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
             ) {
                 Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -433,6 +473,7 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
             )
             MetricLineChart(
                 history = state.history,
+                bgType = bgType,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(150.dp)
@@ -473,10 +514,12 @@ fun InfoContent(server: ServerEntity?, viewModel: ServerViewModel) {
 
 @Composable
 fun MetricLineChart(
-    history: List<ServerMetrics>,
+    history: List<HistoricalMetrics>,
+    bgType: String = "none",
     modifier: Modifier = Modifier
 ) {
-    val tpsList = history.map { it.tps5s.toFloat() }
+    val sortedHistory = history.sortedBy { it.timestamp }
+    val tpsList = sortedHistory.map { it.tps.toFloat() }
     if (tpsList.isEmpty()) return
 
     val maxTps = 20f
@@ -489,61 +532,89 @@ fun MetricLineChart(
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        colors = CardDefaults.cardColors(
+            containerColor = if (bgType != "none") MaterialTheme.colorScheme.surface.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (bgType != "none") 0.dp else 1.dp),
+        border = if (bgType != "none") androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
     ) {
         Box(modifier = Modifier.padding(12.dp)) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val width = size.width
-                val height = size.height
-                val spacing = width / (tpsList.size.coerceAtLeast(2) - 1)
-
-                // Draw Grid Lines
-                listOf(20f, 15f, 10f, 5f).forEach { tps ->
-                    val y = height - (tps / maxTps) * height
-                    drawLine(
-                        color = Color.LightGray.copy(alpha = 0.2f),
-                        start = androidx.compose.ui.geometry.Offset(0f, y),
-                        end = androidx.compose.ui.geometry.Offset(width, y),
-                        strokeWidth = 1.dp.toPx()
+            Column {
+                // Latest value and label
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TPS 实时波动",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "当前: %.2f".format(tpsList.last()),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (tpsList.last() > 18) mcGreen else if (tpsList.last() > 15) mcGold else mcRed
                     )
                 }
+                
+                Spacer(Modifier.height(8.dp))
+                
+                Box(modifier = Modifier.weight(1f)) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val width = size.width
+                        val height = size.height
+                        val spacing = width / (tpsList.size.coerceAtLeast(2) - 1)
 
-                val path = Path()
-                tpsList.forEachIndexed { index: Int, tps: Float ->
-                    val x = index * spacing
-                    val y = height - ((tps - minTps) / (maxTps - minTps)) * height
-                    if (index == 0) {
-                        path.moveTo(x, y)
-                    } else {
-                        path.lineTo(x, y)
+                        // Draw Grid Lines
+                        listOf(20f, 15f, 10f, 5f).forEach { tps ->
+                            val y = height - (tps / maxTps) * height
+                            drawLine(
+                                color = Color.LightGray.copy(alpha = 0.2f),
+                                start = androidx.compose.ui.geometry.Offset(0f, y),
+                                end = androidx.compose.ui.geometry.Offset(width, y),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                        }
+
+                        val path = Path()
+                        tpsList.forEachIndexed { index: Int, tps: Float ->
+                            val x = index * spacing
+                            val y = height - ((tps - minTps) / (maxTps - minTps)) * height
+                            if (index == 0) {
+                                path.moveTo(x, y)
+                            } else {
+                                path.lineTo(x, y)
+                            }
+                        }
+
+                        val chartColor = if (tpsList.last() > 18) mcGreen else if (tpsList.last() > 15) mcGold else mcRed
+
+                        drawPath(
+                            path = path,
+                            color = chartColor,
+                            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                        )
+
+                        // Fill area under the line
+                        val fillPath = Path().apply {
+                            addPath(path)
+                            lineTo(width, height)
+                            lineTo(0f, height)
+                            close()
+                        }
+                        drawPath(
+                            path = fillPath,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    chartColor.copy(alpha = 0.3f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
                     }
                 }
-
-                val chartColor = if (tpsList.last() > 18) mcGreen else if (tpsList.last() > 15) mcGold else mcRed
-
-                drawPath(
-                    path = path,
-                    color = chartColor,
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                )
-
-                // Fill area under the line
-                val fillPath = Path().apply {
-                    addPath(path)
-                    lineTo(width, height)
-                    lineTo(0f, height)
-                    close()
-                }
-                drawPath(
-                    path = fillPath,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            chartColor.copy(alpha = 0.3f),
-                            Color.Transparent
-                        )
-                    )
-                )
             }
         }
     }
@@ -555,21 +626,39 @@ fun ModernMetricCard(
     value: String,
     icon: ImageVector,
     color: Color,
+    bgType: String = "none",
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (bgType != "none") MaterialTheme.colorScheme.surface.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (bgType != "none") 0.dp else 2.dp),
+        border = if (bgType != "none") androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.height(8.dp))
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(
+                color = color.copy(alpha = 0.1f),
+                shape = CircleShape,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(
+                label, 
+                style = MaterialTheme.typography.labelSmall, 
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
@@ -580,33 +669,46 @@ fun UsageCard(
     value: String,
     progress: Float,
     icon: ImageVector,
-    color: Color
+    color: Color,
+    bgType: String = "none"
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (bgType != "none") MaterialTheme.colorScheme.surface.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (bgType != "none") 0.dp else 2.dp),
+        border = if (bgType != "none") androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, contentDescription = null, tint = color.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
+                    Surface(
+                        color = color.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 }
-                Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = color)
+                Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.ExtraBold, color = color)
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             LinearProgressIndicator(
                 progress = progress,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(10.dp)
-                    .clip(RoundedCornerShape(5.dp)),
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(6.dp)),
                 color = color,
                 trackColor = color.copy(alpha = 0.1f)
             )
@@ -636,6 +738,7 @@ fun RawDataSection(title: String, data: String?) {
 @Composable
 fun WhitelistContent(server: ServerEntity, viewModel: ServerViewModel) {
     val whitelist by viewModel.whitelist.collectAsState()
+    val bgType by viewModel.backgroundType.collectAsState()
     var newPlayer by remember { mutableStateOf("") }
 
     LaunchedEffect(server.id) {
@@ -645,24 +748,44 @@ fun WhitelistContent(server: ServerEntity, viewModel: ServerViewModel) {
     Column(modifier = Modifier
         .padding(16.dp)
         .fillMaxSize()) {
-        Text("白名单管理", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("白名单管理", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            IconButton(onClick = { viewModel.fetchWhitelist(server.id) }) {
+                Icon(Icons.Default.Refresh, contentDescription = "刷新", tint = MaterialTheme.colorScheme.primary)
+            }
+        }
         Spacer(Modifier.height(16.dp))
         
-        Card(
+        Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            shape = RoundedCornerShape(20.dp),
+            color = if (bgType != "none") MaterialTheme.colorScheme.surface.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surface,
+            tonalElevation = if (bgType != "none") 0.dp else 1.dp,
+            border = if (bgType != "none") androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
         ) {
-            Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.padding(12.dp), 
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 OutlinedTextField(
                     value = newPlayer,
                     onValueChange = { newPlayer = it },
-                    label = { Text("玩家游戏名") },
+                    placeholder = { Text("输入玩家游戏名") },
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true
+                    shape = RoundedCornerShape(16.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent
+                    )
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(12.dp))
                 Button(
                     onClick = {
                         if (newPlayer.isNotBlank()) {
@@ -670,55 +793,97 @@ fun WhitelistContent(server: ServerEntity, viewModel: ServerViewModel) {
                             newPlayer = ""
                         }
                     },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.height(56.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.height(56.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp)
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
                     Text("添加")
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(24.dp))
 
         if (whitelist.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.PersonOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.outline
+                    Surface(
+                        modifier = Modifier.size(80.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.PersonOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "白名单为空", 
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.outline,
+                        fontWeight = FontWeight.Medium
                     )
-                    Text("白名单为空", color = MaterialTheme.colorScheme.outline)
+                    Text(
+                        "添加玩家到白名单以允许进入", 
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
+                    )
                 }
             }
         } else {
+            Text(
+                "已授权玩家 (${whitelist.size})", 
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
+            )
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(whitelist) { player ->
                     Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (bgType != "none") MaterialTheme.colorScheme.surface.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surface,
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = if (bgType != "none") 0.dp else 1.dp),
+                        border = if (bgType != "none") androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
                     ) {
                         ListItem(
-                            headlineContent = { Text(player, fontWeight = FontWeight.Medium) },
+                            headlineContent = { Text(player, fontWeight = FontWeight.Bold) },
                             leadingContent = { 
                                 Surface(
-                                    modifier = Modifier.size(32.dp),
-                                    shape = CircleShape,
+                                    modifier = Modifier.size(40.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Text(player.take(1).uppercase(), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Text(
+                                            player.take(1).uppercase(), 
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.ExtraBold, 
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
                                     }
                                 }
                             },
                             trailingContent = {
-                                IconButton(onClick = { viewModel.removeWhitelist(server.id, player) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "移除", tint = MaterialTheme.colorScheme.error)
+                                IconButton(
+                                    onClick = { viewModel.removeWhitelist(server.id, player) },
+                                    colors = IconButtonDefaults.iconButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error
+                                    )
+                                ) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = "移除")
                                 }
                             },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent)
@@ -741,7 +906,6 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
     var autoScroll by remember { mutableStateOf(true) }
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     
     // 自动滚动到底部
     LaunchedEffect(logs.size, autoScroll) {
@@ -791,12 +955,32 @@ fun CommandContent(server: ServerEntity, viewModel: ServerViewModel) {
         ) {
             Box(modifier = Modifier.padding(12.dp).fillMaxSize()) {
                 if (logs.isEmpty()) {
-                    Text(
-                        "Ready to send commands to ${server.name}...\n> ",
-                        color = Color(0xFF4CAF50),
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        fontSize = 13.sp
-                    )
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Default.Terminal,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.2f),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "等待日志推送...",
+                            color = Color.White.copy(alpha = 0.3f),
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            "Ready to send commands to ${server.name}",
+                            color = Color(0xFF4CAF50).copy(alpha = 0.5f),
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 } else {
                     LazyColumn(
                         state = listState,

@@ -29,6 +29,16 @@ data class ServerMetrics(
     @SerializedName("disk_total") val diskTotal: Double? = null
 )
 
+data class HistoricalMetrics(
+    val timestamp: String,
+    @SerializedName("tps") val tps: Double,
+    val mspt: Double,
+    @SerializedName("cpu_process") val cpuProcess: Double,
+    @SerializedName("cpu_system") val cpuSystem: Double,
+    @SerializedName("memory_used") val memUsed: Double,
+    @SerializedName("memory_max") val memMax: Double
+)
+
 data class WhitelistResponse(
     val enabled: Boolean,
     val players: List<String>

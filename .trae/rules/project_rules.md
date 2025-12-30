@@ -10,6 +10,20 @@
 
 ## 功能设计要求
 - **首页**: 标题 "ServerSee 客户端"
+- **设置页**: 深度优化的设置中心：
+    - **外观与交互**: 
+        - 支持手动切换深色/浅色模式/跟随系统。
+        - **颜色方案**: 支持“从系统获取 (动态色彩)”、“预设方案 (蓝/绿/红/橙/紫/青)”以及“自定义 Hex 颜色”。
+        - 支持自定义数据轮询间隔（3s-30s）。
+    - **关于软件**: 自动显示版本号，集成 GitHub Releases 检查更新及项目开源地址跳转。
+    - **数据持久化**: 设置项通过 `SharedPreferences` 实现本地持久化，并在 `ServerViewModel` 中全局同步。
+- **统计逻辑**: 首页统计信息（总数、离线数、玩家总数）必须基于当前数据库中的服务器列表进行计算，防止因已删除服务器的状态残留导致出现负数（如 -1）或统计不准。删除服务器时需同步清除 `ServerViewModel` 中的状态缓存，并在计算离线数量时使用 `.coerceAtLeast(0)` 确保结果非负。
+- **自定义背景**: 
+        - 支持图片 (Image) 和视频 (Video) 背景。
+        - **视频背景**: 使用 Media3 (ExoPlayer) 实现，支持循环播放和自定义音量。
+        - **缩放模式**: 提供“撑满 (Crop)”、“自适应 (Fit)”和“拉伸 (FillBounds)”三种模式。
+        - **透明度调节**: 支持自定义内容覆盖层的透明度 (0.0-1.0)，确保背景素材与界面内容的视觉平衡。
+        - **UI 适配**: 当启用背景时，内容容器会应用用户定义的透明度，默认值为 0.7。
 - **统计信息**: 顶栏显示总数、离线数量和总玩家数。
 - **添加服务器**: 右下角 FAB 按钮，弹窗包含：
     - API 端点 (必填)
@@ -30,6 +44,7 @@
 - **数据刷新**: 首页采用 5 秒轮询机制更新各服务器的 TPS、CPU 和内存状态。
 - **权限隔离**: 详情页根据 `token` 是否为空动态切换 UI 布局，隐藏敏感操作入口。
 - **主题管理**: 支持系统自适应主题（深色/浅色模式），并集成了 Android 12+ 的动态色彩 (Dynamic Color) 功能。
+- **高级颜色选择器**: 在设置中集成了类似 VS Code 的高级颜色选择器 (HSV 模型)，支持通过色相滑块和饱和度/亮度方块精确自定义主颜色。
 - **持久化**: 使用 Room 存储服务器配置，确保应用重启后数据不丢失。
 - **Gradle 配置**: 必须启用 `android.useAndroidX` 和 `android.enableJetifier` 以支持现代库。
 - **Compose 实验性 API**: 使用 `basicMarquee` 或 `CenterAlignedTopAppBar` 等实验性组件时，需添加 `@OptIn` 注解及对应库引用。
@@ -39,11 +54,16 @@
 - **明文传输**: Android 9+ 默认禁止 HTTP 明文传输。需在 `res/xml` 创建 `network_security_config.xml` 允许明文传输，并在 `AndroidManifest.xml` 的 `application` 标签中通过 `android:networkSecurityConfig` 引用。
 - **403 错误处理**: 若 API 返回 403 Forbidden，通常是由于缺少 `User-Agent` 或服务器配置了强制鉴权。已在 `ServerRepository` 中通过 `OkHttpClient` 拦截器统一添加 `User-Agent`，并确保所有请求（包括状态查询）在有 Token 时都会携带 `Authorization` 头。
 - **添加服务器优化**: 在添加服务器弹窗中集成了“获取服务器信息并测试”功能。支持实时预览服务器图标 (Avatar) 和 MOTD（支持颜色解析）。增加“自动使用 MOTD 作为名称”选项，并支持可选的“服务器连接地址”存储，简化添加流程。
-- **UI 适配**: 首页和卡片组件已全面适配 Material 3 动态颜色和系统主题（深色/浅色模式），确保在不同主题下均有良好的视觉表现。
+- **UI 适配**: 首页和卡片组件已全面适配 Material 3 动态颜色和系统主题（深色/浅色模式），并进行了深度优化：
+    - **首页**: 统计栏采用 Surface 容器，支持 2dp 抬升感，标题栏支持动态在线状态显示。
+    - **详情页**: 指标卡片 (MetricCard) 和 进度条卡片 (UsageCard) 采用更现代的圆角 (24.dp) 和 图标容器设计。
+    - **终端与白名单**: 优化了空状态显示，增加了手动刷新功能，并统一了 Material 3 交互风格。
+    - **设置页**: 采用分组式卡片布局 (SettingsGroup)，集成了版本号自动获取逻辑。
 - **数据库升级**: 引入了 Room 数据库版本升级机制 (v1 -> v2 -> v3)，并配置了破坏性迁移以支持新字段的添加。
 - **系统指标采集**: 插件已移除对 `spark` 的依赖，改为内置指标采集方案：
-    - **TPS/MSPT**: 通过 `TickMonitor` 实现，利用 Bukkit 任务调度器监听每 tick 的耗时和时间戳，计算 5 秒和 1 分钟平均值。
-    - **CPU 使用率**: 利用 `com.sun.management.OperatingSystemMXBean` 获取进程和系统的 CPU 负载。
+    - **TPS/MSPT**: 通过 `TickMonitor` 实现，利用 Bukkit 任务调度器监听每 tick 的耗时和时间戳，计算 5 秒 and 1 分钟平均值。
+- **历史数据获取**: TPS 历史波动图已重构为完全依赖插件端提供的 `history` 接口，不再在客户端本地记录。客户端使用 `HistoricalMetrics` 模型解析插件端从 SQLite 数据库返回的带时间戳的数据，并在详情页通过 `MetricLineChart` 组件进行趋势展示。
+- **CPU 使用率**: 利用 `com.sun.management.OperatingSystemMXBean` 获取进程和系统的 CPU 负载。
     - **内存/磁盘**: 继续使用 `oshi-core` 和 `java.lang.Runtime` 获取物理内存、JVM 内存及磁盘空间信息。
 - **构建体积优化 (JAR)**: 
     - **依赖分析**: 插件体积主要来自 WebSocket 服务器、SQLite-JDBC 和 OSHI/JNA。
@@ -67,7 +87,17 @@
     - **日志复制**: 支持长按单行日志复制到剪贴板，以及一键复制控制台当前所有缓存日志。
     - **ANSI 颜色**: 支持解析 ANSI 转义码（如 `\u001b[31m`），使终端输出能正确显示系统日志的颜色。
     - **API 版本**: `plugin.yml`中`api-version`已设为`1.13`，确保跨版本兼容性。
-- **JSON 序列化一致性**: 为了确保 HMAC 签名计算在不同端（Android/Java）的一致性，统一使用 `disableHtmlEscaping()` 配置 Gson 实例，防止 HTML 字符转义导致签名不匹配。
+- **JSON 序列化一致性**: 为了确保 HMAC 签名计算在不同端（Android/Java）的一代性，统一使用 `disableHtmlEscaping()` 配置 Gson 实例，防止 HTML 字符转义导致签名不匹配。
+- **本地协议解析**: 为了解决第三方 API (mcsrvstat.us) 的 429 速率限制问题，实现了 `MinecraftPing` 工具类：
+    - **Java 协议 (TCP)**: 通过标准握手和状态请求获取服务器状态及 Base64 图标 (`favicon`)。
+    - **基岩协议 (UDP)**: 通过 RakNet Unconnected Ping 获取在线状态和人数。由于基岩协议原生不支持图标，额外增加了 **Java 协议探测机制**，尝试在同一地址的标准端口 (25565) 或自定义端口获取图标。
+    - **解析顺序**: 在 `ServerRepository` 中优先使用本地解析，解析失败时才回退至第三方 API，并辅以 30 秒缓存机制。
+- **429 Too Many Requests 错误处理**:
+    - **原因**: 插件端默认限流较低（120次/分钟），且客户端在多服务器或网络波动时可能触发频繁重连。
+    - **插件端优化**: 在 `config.yml` 中增加了 `api-rate-limit` 配置，并将默认值提升至 600，同时在触发限流时记录警告日志以便排查。
+    - **客户端优化**: 
+        - 在 `WebSocketClient` 中增加了心跳机制（每 30 秒发送一次 `ping`），保持连接活跃，减少重连次数。
+        - 在 `ServerViewModel` 中引入了 `Mutex` 锁和状态检查，防止针对同一服务器的轮询任务发生重叠堆积。
 - **Unauthorized 异常修复**: 
     - **WebSocket 客户端缓存**: `ServerRepository` 采用 `endpoint|token` 作为缓存键，确保不同 Token 的服务器连接实例完全隔离。
     - **鉴权逻辑优化**: 轮询 `metrics` 时仅在有 Token 时发起请求，并在 `getHistory` 中补齐了 Token 参数以支持详情页鉴权。
@@ -76,4 +106,21 @@
     - **独立进程**: 崩溃页面 `CrashActivity` 运行在 `:crash` 独立进程中，确保在主进程崩溃时仍能稳定显示。
     - **功能集成**: 崩溃页面提供错误堆栈详情展示、一键重启应用、复制崩溃日志到剪贴板以及安全退出应用的功能。
     - **初始化**: 在自定义 `ServerSeeApp` 类中完成全局初始化。
+    - **网络异常捕获**: 在 `ServerViewModel` 的异步任务（如日志同步 `startLogSync`、指令执行 `executeCommand`、白名单操作等）中全面增加了 `try-catch` 块，确保在服务器离线或连接失败（如 `ConnectException`）时不会导致应用崩溃，而是通过 `lastError` 状态提示用户。
 - **更新检查 (插件端)**: 插件启动时会异步请求 GitHub API (`ServerSeeMC/ServerSee-Plugin`) 获取最新 Release 标签，并与本地版本进行语义化比较，若有新版本则在控制台输出更新提醒。
+- **媒体与背景系统**:
+    - **视频引擎**: 集成 Media3 (ExoPlayer) 以提供高性能的视频渲染能力。
+    - **背景容器**: 实现 `GlobalBackground` 组件，通过 `AndroidView` 桥接 `PlayerView`，支持在 Compose UI 底层显示媒体内容。
+    - **URI 权限**: 针对 Android 10+ 的存储访问，通过 `takePersistableUriPermission` 确保应用重启后仍能访问用户选择的外部媒体文件。
+    - **图标解析优化**:
+    - **优先本地图标**: 在 `ServerCard`、`DetailScreen` 和 `AddServerDialog` 中，优先使用从服务器协议中解析出的 Base64 图标 (`favicon`)。仅在本地图标缺失且启用了“根据地址获取头像”时，才回退至第三方 API (`mcsrvstat.us`)。
+    - **API 健壮性**: 在 `ServerRepository` 中增加了对第三方 API 返回非字符串图标字段（如布尔值）的类型检查，防止解析崩溃。
+    - **加载容错**: 所有 `AsyncImage` 均配置了 `error` 占位符（使用 `primaryContainer` 颜色），确保在图标加载失败时仍有视觉反馈。
+    - **插件端优化**: 插件端 `ApiServer` 改为直接使用 `Files.readAllBytes` 读取 `server-icon.png`，避免在无图形界面环境下使用 `ImageIO` 可能导致的解析失败。
+- **背景与透明度适配**:
+    - **动态背景**: 当启用图片或视频背景时，全局应用用户定义的透明度 (`bgAlpha`)。
+    - **UI 穿透**: 为了确保背景可见，当启用背景时：
+        - `Scaffold`、`TopAppBar` 和 `NavigationBar` 的容器颜色设为透明。
+        - 首页 `StatItem` 和 `ServerCard` 自动切换为半透明模式 (`surface.copy(alpha = 0.7f)`)，并应用细边框增加识别度。
+        - 详情页 `ModernMetricCard` 和 `UsageCard` 同步应用半透明背景，移除冗余的渐变遮罩。
+        - 所有卡片在背景模式下降低阴影 (`elevation`) 以提升扁平化现代感。

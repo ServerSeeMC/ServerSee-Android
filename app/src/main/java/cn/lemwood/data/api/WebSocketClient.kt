@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
@@ -34,6 +35,7 @@ class WebSocketClient(
         .create()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var webSocket: WebSocket? = null
+    private var heartbeatJob: kotlinx.coroutines.Job? = null
     
     private val pendingRequests = mutableMapOf<String, CompletableDeferred<JsonObject>>()
     private val mutex = Mutex()
@@ -68,6 +70,7 @@ class WebSocketClient(
                     isConnected = true
                     deferred.complete(Unit)
                     Log.d("WebSocketClient", "Connected to $wsUrl")
+                    startHeartbeat()
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -185,7 +188,27 @@ class WebSocketClient(
         }
     }
 
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            while (isConnected) {
+                delay(30000) // 30 seconds
+                try {
+                    val pingRequest = JsonObject().apply {
+                        addProperty("id", UUID.randomUUID().toString())
+                        addProperty("type", "request")
+                        addProperty("action", "ping")
+                    }
+                    webSocket?.send(gson.toJson(pingRequest))
+                } catch (e: Exception) {
+                    Log.e("WebSocketClient", "Heartbeat failed", e)
+                }
+            }
+        }
+    }
+
     private fun cleanup() {
+        heartbeatJob?.cancel()
         scope.launch {
             mutex.withLock {
                 pendingRequests.forEach { (_, deferred) ->
@@ -197,6 +220,7 @@ class WebSocketClient(
     }
 
     fun close() {
+        heartbeatJob?.cancel()
         webSocket?.close(1000, "App closing")
         webSocket = null
         isConnected = false
